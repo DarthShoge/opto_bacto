@@ -17,11 +17,15 @@ def extract_ccy(ccy, df_, contract_len=21):
     return ccy_df
 
 
-def get_all_data(conn_str='DRIVER=SQL Server;SERVER=SQLINT;DATABASE=SMW'):
+def get_all_data(conn_str='DRIVER=SQL Server;SERVER=SQLINT;DATABASE=SMW', from_date = None):
     with pyodbc.connect(conn_str) as con:
         df = pd.read_sql('''SELECT mds.ReferenceDate, ci.CurrencyPair, ci.Spot, ci.ImpliedVol, 
                             ci.Butterfly, ci.RiskRev FROM dbo.CalcInput ci 
                             JOIN dbo.MarketDataSet mds ON mds.Id = ci.MarketDataSetId AND mds.IsMaster = 1''', con)
+
+        if from_date :
+            df = df[df.ReferenceDate >= from_date]
+
         all_ccys = set(df.CurrencyPair.values)
         df_dict = {ccy: extract_ccy(ccy, df) for ccy in all_ccys}
         return df_dict
@@ -66,8 +70,10 @@ def calculate_25_delta_call_implied_vol(bfly_25, risk_rev, atm_imp_vol):
 
 
 def process_ccy(ccy_df):
-    ccy_df['Put_OTM_Vol'] = calculate_25_delta_put_implied_vol(ccy_df.Butterfly, ccy_df.RiskRev, ccy_df.ImpliedVol)
-    ccy_df['Call_OTM_Vol'] = calculate_25_delta_call_implied_vol(ccy_df.Butterfly, ccy_df.RiskRev, ccy_df.ImpliedVol)
+    ccy_df['Put_25_Vol'] = calculate_25_delta_put_implied_vol(ccy_df.Butterfly, ccy_df.RiskRev, ccy_df.ImpliedVol)
+    ccy_df['Call_25_Vol'] = calculate_25_delta_call_implied_vol(ccy_df.Butterfly, ccy_df.RiskRev, ccy_df.ImpliedVol)
+    return 1+1
+
 
 
 def plot_payoff(x: Instrument, upper, lower, incr=0.5):
@@ -77,6 +83,10 @@ def plot_payoff(x: Instrument, upper, lower, incr=0.5):
     plt.plot(prices, inst_values)
     plt.plot(prices, zero)
     plt.show()
+
+
+class Portfolio:
+    pass
 
 
 def main():
@@ -90,6 +100,28 @@ def expand_through_array(arr, start=0):
         i += 1
         yield arr[start: i]
 
-def expand_through_time(df_dict):
+
+def recursive_expand(arr, func, end=1, carry=None):
+    if end <= len(arr):
+        new_carry = func(arr[0:end], carry)
+        yield new_carry
+        yield from recursive_expand(arr, func, end + 1, new_carry)
+
+
+def expand_through_time(df_dict, strat):
+    def expand_func(ccy_df_dict, dates, portfolio, strategy):
+        if not portfolio:
+            portfolio = Portfolio()
+        data_for_slice = {k: v.loc[dates, :] for k, v in ccy_df_dict.items()}
+        new_portfolio = strategy(data_for_slice, portfolio)
+        return new_portfolio
+
     example = next((y for x, y in df_dict.items()))
-    expanding_dates = [x for x in expand_through_array(example.index)]
+    # expanding_dates = [x for x in expand_through_array(example.index)]
+    results = [x for x in recursive_expand(example.index, lambda x, y: expand_func(df_dict,x, y, strat))]
+    return results
+
+
+data = get_all_data(from_date='2019-12-01')
+process_ccy(data['EURUSD'])
+
