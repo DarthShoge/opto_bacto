@@ -1,3 +1,5 @@
+from typing import List
+
 import matplotlib.pyplot as plt
 
 import numpy as np
@@ -17,13 +19,13 @@ def extract_ccy(ccy, df_, contract_len=21):
     return ccy_df
 
 
-def get_all_data(conn_str='DRIVER=SQL Server;SERVER=SQLINT;DATABASE=SMW', from_date = None):
+def get_all_data(conn_str='DRIVER=SQL Server;SERVER=SQLINT;DATABASE=SMW', from_date=None):
     with pyodbc.connect(conn_str) as con:
         df = pd.read_sql('''SELECT mds.ReferenceDate, ci.CurrencyPair, ci.Spot, ci.ImpliedVol, 
                             ci.Butterfly, ci.RiskRev FROM dbo.CalcInput ci 
                             JOIN dbo.MarketDataSet mds ON mds.Id = ci.MarketDataSetId AND mds.IsMaster = 1''', con)
 
-        if from_date :
+        if from_date:
             df = df[df.ReferenceDate >= from_date]
 
         all_ccys = set(df.CurrencyPair.values)
@@ -72,8 +74,15 @@ def calculate_25_delta_call_implied_vol(bfly_25, risk_rev, atm_imp_vol):
 def process_ccy(ccy_df):
     ccy_df['Put_25_Vol'] = calculate_25_delta_put_implied_vol(ccy_df.Butterfly, ccy_df.RiskRev, ccy_df.ImpliedVol)
     ccy_df['Call_25_Vol'] = calculate_25_delta_call_implied_vol(ccy_df.Butterfly, ccy_df.RiskRev, ccy_df.ImpliedVol)
-    return 1+1
+    return 1 + 1
 
+
+def interpolate_vol_space(delta, vol_space, delta_space):
+    delta_space[0] = -50 - delta_space[0]
+    delta_space[-1] = 50 - delta_space[-1]
+    delta_translate = max(-50 - delta, delta_space[0]) if delta < 0 else min(50 - delta, delta_space[-1])
+    poly = np.poly1d(np.polyfit(delta_space, vol_space, deg=2))
+    return poly(delta_translate), poly
 
 
 def plot_payoff(x: Instrument, upper, lower, incr=0.5):
@@ -86,7 +95,31 @@ def plot_payoff(x: Instrument, upper, lower, incr=0.5):
 
 
 class Portfolio:
-    pass
+    def __init__(self, positions: List[Instrument]):
+        self.__positions = positions
+        self.historical_values = [0]
+
+    def value(self, spot, date, new_positions: List[Instrument]):
+        transaction_costs = self.__apply_transaction_costs(new_positions)
+        # Maybe I should validate new positions at this point
+        self.__positions = self.__positions + new_positions
+        ptfolio_sum = sum([x.value(spot) for x in self.__positions])
+        ptfolio_new_value = ptfolio_sum + transaction_costs
+        self.historical_values.append(ptfolio_new_value)
+        self.__close_out_expired_positions(date)
+        return ptfolio_new_value
+
+    def __apply_transaction_costs(self, new_positions):
+        return 0
+
+    def __close_out_expired_positions(self, date):
+        inexpired_positions = [p for p in self.__positions if date <= p.delivery_date]
+        self.__positions = inexpired_positions
+
+
+class SimplePortfolio:
+    def __init__(self, counter=0):
+        self.counter = counter
 
 
 def main():
@@ -118,10 +151,15 @@ def expand_through_time(df_dict, strat):
 
     example = next((y for x, y in df_dict.items()))
     # expanding_dates = [x for x in expand_through_array(example.index)]
-    results = [x for x in recursive_expand(example.index, lambda x, y: expand_func(df_dict,x, y, strat))]
+    results = [x for x in recursive_expand(example.index, lambda x, y: expand_func(df_dict, x, y, strat))]
     return results
 
 
-data = get_all_data(from_date='2019-12-01')
-process_ccy(data['EURUSD'])
+def fake_strat(data, portfolio):
+    return Portfolio(portfolio.counter + 1)
 
+
+# interpolate_vol_space(-10,[4.71,4.48,5.23],[-5,0,5])
+data = get_all_data(from_date='2018-12-01')
+ptflo = expand_through_time(data, fake_strat)
+process_ccy(data['EURUSD'])
