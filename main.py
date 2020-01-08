@@ -1,4 +1,4 @@
-from typing import List
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 
@@ -7,7 +7,9 @@ import pyodbc
 import pandas as pd
 from pyfinance.options import BSM
 
-from instrument import Instrument
+from backtest import Portfolio, expand_through_time
+from instrument import Instrument, Call, Direction
+from strategies import passive_market_exposure
 
 
 def extract_ccy(ccy, df_, contract_len=21):
@@ -23,7 +25,7 @@ def get_all_data(conn_str='DRIVER=SQL Server;SERVER=SQLINT;DATABASE=SMW', from_d
     with pyodbc.connect(conn_str) as con:
         df = pd.read_sql('''SELECT mds.ReferenceDate, ci.CurrencyPair, ci.Spot, ci.ImpliedVol, 
                             ci.Butterfly, ci.RiskRev FROM dbo.CalcInput ci 
-                            JOIN dbo.MarketDataSet mds ON mds.Id = ci.MarketDataSetId AND mds.IsMaster = 1''', con)
+                            JOIN dbo.MarketDataSet mds ON mds.Id = ci.MarketDataSetId AND mds.IsMaster = 1''', con,parse_dates=['ReferenceDate'])
 
         if from_date:
             df = df[df.ReferenceDate >= from_date]
@@ -94,72 +96,18 @@ def plot_payoff(x: Instrument, upper, lower, incr=0.5):
     plt.show()
 
 
-class Portfolio:
-    def __init__(self, positions: List[Instrument]):
-        self.__positions = positions
-        self.historical_values = [0]
-
-    def value(self, spot, date, new_positions: List[Instrument]):
-        transaction_costs = self.__apply_transaction_costs(new_positions)
-        # Maybe I should validate new positions at this point
-        self.__positions = self.__positions + new_positions
-        ptfolio_sum = sum([x.value(spot) for x in self.__positions])
-        ptfolio_new_value = ptfolio_sum + transaction_costs
-        self.historical_values.append(ptfolio_new_value)
-        self.__close_out_expired_positions(date)
-        return ptfolio_new_value
-
-    def __apply_transaction_costs(self, new_positions):
-        return 0
-
-    def __close_out_expired_positions(self, date):
-        inexpired_positions = [p for p in self.__positions if date <= p.delivery_date]
-        self.__positions = inexpired_positions
-
-
-class SimplePortfolio:
-    def __init__(self, counter=0):
-        self.counter = counter
+# interpolate_vol_space(-10,[4.71,4.48,5.23],[-5,0,5])
+op1 = Call(direction=Direction.LONG,
+           spot=1.10,
+           strike=1.12,
+           length=1/12,
+           intrate= 0.01,
+           sigma=0.1,
+           tran_date=datetime.now())
+data = get_all_data(from_date='2018-12-01')
+ptflo = expand_through_time(data, passive_market_exposure, Portfolio())
+process_ccy(data['EURUSD'])
 
 
 def main():
     fx_df_dict = get_all_data()
-
-
-def expand_through_array(arr, start=0):
-    arr_size = len(arr)
-    i = start
-    while i < arr_size:
-        i += 1
-        yield arr[start: i]
-
-
-def recursive_expand(arr, func, end=1, carry=None):
-    if end <= len(arr):
-        new_carry = func(arr[0:end], carry)
-        yield new_carry
-        yield from recursive_expand(arr, func, end + 1, new_carry)
-
-
-def expand_through_time(df_dict, strat):
-    def expand_func(ccy_df_dict, dates, portfolio, strategy):
-        if not portfolio:
-            portfolio = Portfolio()
-        data_for_slice = {k: v.loc[dates, :] for k, v in ccy_df_dict.items()}
-        new_portfolio = strategy(data_for_slice, portfolio)
-        return new_portfolio
-
-    example = next((y for x, y in df_dict.items()))
-    # expanding_dates = [x for x in expand_through_array(example.index)]
-    results = [x for x in recursive_expand(example.index, lambda x, y: expand_func(df_dict, x, y, strat))]
-    return results
-
-
-def fake_strat(data, portfolio):
-    return Portfolio(portfolio.counter + 1)
-
-
-# interpolate_vol_space(-10,[4.71,4.48,5.23],[-5,0,5])
-data = get_all_data(from_date='2018-12-01')
-ptflo = expand_through_time(data, fake_strat)
-process_ccy(data['EURUSD'])
