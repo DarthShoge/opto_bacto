@@ -97,7 +97,7 @@ def plot_payoff(x: Instrument, upper, lower, incr=0.5):
 
 
 # interpolate_vol_space(-10,[4.71,4.48,5.23],[-5,0,5])
-op1 = Call(direction=Direction.LONG,
+op1 = Call(direction=Direction.SHORT,
            spot=1.10,
            strike=1.12,
            length=1/12,

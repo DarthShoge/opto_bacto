@@ -155,6 +155,7 @@ class Forward(Instrument):
         self.trade_value = spot
         self.tran_date = tran_date
         self.contra_value = 1 / spot
+        self.pnl = [0]
         self.delivery_date = datetime.timedelta(weeks=length * 48) + tran_date
 
     def intrinsic_value(self, spot):
@@ -162,7 +163,11 @@ class Forward(Instrument):
         return contra_value - self.trade_value if self.direction is Direction.LONG else self.trade_value - contra_value
 
     def value(self, spot):
-        return np.log(spot / self.trade_value)
+        dir_multiplier = -1 if self.direction is Direction.SHORT else 1
+        value = np.log(spot / self.trade_value)
+        returns = value - sum(self.pnl)
+        self.pnl.append(returns)
+        return returns * dir_multiplier
 
     def exercise(self, spot):
         if self.is_open:

@@ -1,6 +1,7 @@
 from copy import deepcopy
 from itertools import groupby
-from typing import List, Callable, Dict
+from typing import List, Callable, Dict, Tuple
+import numpy as np
 
 import pandas as pd
 
@@ -14,7 +15,7 @@ class Portfolio:
         self.value_history = {}
 
     @property
-    def positions(self):
+    def positions(self) -> Tuple[Instrument]:
         # returns immutable list but #NOTE underlying items can still be changed so beware
         return tuple(self.__positions) if self.__positions is not None else ()
 
@@ -22,13 +23,15 @@ class Portfolio:
         # Maybe I should validate new positions at this point
         last_attribution = list(self.attribution.values())[-1] if self.attribution else []
         attribution_sum = sum([x.value(spot) for x in positions])
-        return attribution_sum if not last_attribution else attribution_sum - sum([v[id]for k,v in self.attribution.items()])
+        return attribution_sum
+        # return attribution_sum if not last_attribution else attribution_sum - sum([v[id]for k,v in self.attribution.items()])
 
     def value_all(self, spot_dict, new_positions):
         transaction_costs = self.__apply_transaction_costs(new_positions)
         self.__positions = self.__positions + new_positions
         position_dict = {k: list(g) for k, g in groupby(self.positions, lambda p: p.id)}
         date = next((y for x, y in spot_dict.items())).index[-1]
+        self.__close_out_expired_positions(date)
         slice_attribution = {inst_id: self.value(id=inst_id,
                                                  spot=spot_dict[inst_id].Spot.iloc[-1],
                                                  positions=positions) for
@@ -36,7 +39,6 @@ class Portfolio:
         self.attribution[date] = (slice_attribution)
         ptfolio_sum = sum([v for k, v in slice_attribution.items()])
         ptfolio_new_value = ptfolio_sum + transaction_costs
-        self.__close_out_expired_positions(date)
         self.value_history[date] = ptfolio_new_value
         return ptfolio_new_value
 
@@ -44,7 +46,7 @@ class Portfolio:
         return 0
 
     def __close_out_expired_positions(self, date):
-        inexpired_positions = [p for p in self.__positions if date <= p.delivery_date]
+        inexpired_positions = [p for p in self.__positions if date < p.delivery_date]
         self.__positions = inexpired_positions
 
 
